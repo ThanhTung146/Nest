@@ -2,6 +2,7 @@ import {
     Controller,
     Post,
     Get,
+    Put,
     UseInterceptors,
     UploadedFile,
     Body,
@@ -270,5 +271,26 @@ export class HomeworkController {
     ) {
         const teacherId = req.user.id;
         return this.homeworksService.gradeHomework(id, teacherId, gradeData);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Put('assignment/:id/review')
+    @ApiOperation({ summary: 'Review and grade homework assignment (Teacher only)' })
+    @ApiParam({ name: 'id', description: 'Assignment ID' })
+    @ApiResponse({
+        status: 200,
+        description: 'Assignment reviewed successfully',
+    })
+    async reviewHomework(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() reviewData: { 
+            grade?: string; 
+            feedback: string; 
+            status: 'graded' | 'pending' 
+        },
+        @Request() req
+    ) {
+        const teacherId = req.user.id;
+        return this.homeworksService.reviewHomework(id, teacherId, reviewData);
     }
 }

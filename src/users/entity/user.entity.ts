@@ -3,6 +3,8 @@ import { Group } from 'src/groups/entities/group.entity';
 import { Homework } from 'src/homework/entities/homework.entity';
 import { Lesson } from 'src/lessons/entities/lesson.entity';
 import { Role } from 'src/roles/entity/roles.entity';
+import { NotificationRecipient } from 'src/notifications/entities/notification-recipient.entity';
+import { RefreshToken } from 'src/auth/entities/refresh-token.entity';
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, OneToMany, ManyToMany } from 'typeorm';
 
 @Entity()
@@ -10,7 +12,7 @@ export class User {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @Column() // ❌ THIẾU COLUMN NAME
+    @Column()
     name: string;
 
     @Column({ unique: true })
@@ -19,7 +21,7 @@ export class User {
     @Column()
     password: string;
 
-    @ManyToOne(() => Role, (role) => role.users, { eager: false, nullable: false }) // ❌ SỬA eager: false
+    @ManyToOne(() => Role, (role) => role.users, { eager: false, nullable: false }) 
     @JoinColumn({ name: 'role_id' })
     role: Role;
 
@@ -29,7 +31,7 @@ export class User {
     @ManyToMany(() => Group, (group) => group.students)
     groups: Group[];
 
-    @OneToMany(() => Lesson, (lesson) => lesson.creator, { eager: false }) // ❌ SỬA eager: false
+    @OneToMany(() => Lesson, (lesson) => lesson.creator, { eager: false }) 
     createdLessons: Lesson[];
 
     @OneToMany(() => DeviceToken, (dt) => dt.user)
@@ -38,4 +40,9 @@ export class User {
     @OneToMany(() => Homework, (homework) => homework.createdBy)
     createdHomeworks: Homework[];
 
+    @OneToMany(() => NotificationRecipient, (recipient) => recipient.user)
+    notificationRecipients: NotificationRecipient[];
+
+    @OneToMany(() => RefreshToken, (refreshToken) => refreshToken.user)
+    refreshTokens: RefreshToken[];
 }

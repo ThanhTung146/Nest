@@ -5,7 +5,8 @@ import { Repository } from 'typeorm';
 import { User } from 'src/users/entity/user.entity';
 import { Group } from 'src/groups/entities/group.entity';
 import { CreateLessonRequest } from './dto/request/lesson-request.dto';
-import { FirebaseService } from 'src/notifications/notification.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
+import { NotificationType } from 'src/notifications/entities/notification.entity';
 import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 
 @Injectable()
@@ -14,7 +15,7 @@ export class LessonsService {
         @InjectRepository(Lesson) private lessonRepository: Repository<Lesson>,
         @InjectRepository(User) private userRepository: Repository<User>,
         @InjectRepository(Group) private groupRepository: Repository<Group>,
-        private readonly notifyService: FirebaseService,
+        private readonly notifyService: NotificationsService,
         private readonly cloudinaryService: CloudinaryService,
     ) { }
 
@@ -80,36 +81,90 @@ export class LessonsService {
         return updatedLesson;
     }
 
+    async removeVideo(lessonId: number, teacherId: number) {
+        const lesson = await this.lessonRepository.findOne({
+            where: { id: lessonId },
+            relations: ['creator'],
+        });
+
+        if (!lesson) {
+            throw new NotFoundException('Lesson not found');
+        }
+
+        if (!lesson.creator || lesson.creator.id !== teacherId) {
+            throw new Error('You can only remove video from your own lessons');
+        }
+
+        if (!lesson.videoUrl) {
+            throw new Error('No video to remove');
+        }
+
+        // Remove video from cloudinary if exists
+        if (lesson.videoUrl && this.cloudinaryService) {
+            try {
+                // Extract public_id from cloudinary URL to delete
+                const urlParts = lesson.videoUrl.split('/');
+                const fileWithExtension = urlParts[urlParts.length - 1];
+                const publicId = fileWithExtension.split('.')[0];
+                await this.cloudinaryService.deleteVideo(publicId);
+            } catch (error) {
+                console.error('Error deleting video from cloudinary:', error);
+            }
+        }
+
+        // Clear video fields
+        delete lesson.videoUrl;
+        delete lesson.videoSize;
+
+        const updatedLesson = await this.lessonRepository.save(lesson);
+
+        return {
+            message: 'Video removed successfully',
+            lesson: updatedLesson
+        };
+    }
+
     async notifyGroup(groupId: number, title: string, content: string) {
         const group = await this.groupRepository.findOne({
             where: { id: groupId },
-            relations: ['students', 'students.deviceTokens'] // Giả sử mỗi student có mảng deviceTokens
+            relations: ['students']
         })
+
         if (!group) {
             throw new Error('Group not found');
         }
-        const deviceTokens = group.students.map(student => student.deviceTokens).filter(token => token);
-        const tokens = deviceTokens.flat().map(token => token.token).filter(token => token); // Giả sử mỗi student có một mảng tokens
 
-        // TODO: Lấy FCM tokens thật từ students
-        // Hiện tại sử dụng mock tokens để test
-        // const mockTokens = [
-        //     // Thay thế bằng FCM tokens thật từ database
-        //     'mock-token-1',
-        //     'mock-token-2',
-        //     'mock-token-3'
-        // ];
+        if (!group.students || group.students.length === 0) {
+            return { success: false, message: 'No students in group' };
+        }
 
-        console.log(`Sending notification to ${group.students?.length || 0} students`);
-        console.log('Device tokens being used:', tokens);
+        const studentIds = group.students.map(student => student.id);
 
         try {
-            // Gọi method đúng: sendNotificationToToken (không phải sendNotificationToTokens)
-            const response = await this.notifyService.sendNotificationToToken(tokens, title, content);
-            console.log('Firebase notification response:', response);
-            return response;
+            // Use NotificationsService to create and send notifications
+            // This will BOTH save to database AND send FCM
+            const results = await this.notifyService.createAndSendToMultiple(
+                studentIds,
+                {
+                    type: NotificationType.LESSON_CREATED,
+                    title,
+                    body: content,
+                    data: {
+                        type: 'lesson',
+                        groupId,
+                        timestamp: new Date().toISOString()
+                    }
+                }
+            );
+
+            return { 
+                success: true, 
+                notificationsCreated: results.recipients.length, 
+                results: results.recipients 
+            };
+
         } catch (error) {
-            console.error('Error sending notification:', error);
+            console.error('Error in lesson notifyGroup:', error);
             throw error;
         }
     }
@@ -136,7 +191,7 @@ export class LessonsService {
 
     async getAllLessonsByTeacher(teacherId: number, page: number = 1, limit: number = 10) {
         const skip = (page - 1) * limit;
-        
+
         const [lessons, total] = await this.lessonRepository.findAndCount({
             where: { creator: { id: teacherId } },
             relations: ['group', 'creator'],

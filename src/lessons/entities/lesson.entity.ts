@@ -15,13 +15,13 @@ export class Lesson {
     content: string;
 
     @Column({ nullable: true })
-    videoUrl: string;
+    videoUrl?: string;
 
     @Column({ nullable: true })
-    videoPath: string;
+    videoPath?: string;
 
     @Column({ nullable: true })
-    videoSize: number;
+    videoSize?: number;
 
     @CreateDateColumn()
     createdAt: Date;

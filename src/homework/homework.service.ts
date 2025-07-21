@@ -5,7 +5,8 @@ import { Repository, In, Between } from 'typeorm';
 import { createdHomeworksRequest } from './dto/request/homework-request.dto';
 import { HomeworkAssignment, HomeworkStatus } from './entities/homework-assigment.entity';
 import { User } from 'src/users/entity/user.entity';
-import { FirebaseService } from 'src/notifications/notification.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
+import { NotificationType } from 'src/notifications/entities/notification.entity';
 import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 
 @Injectable()
@@ -14,81 +15,39 @@ export class HomeworkService {
         @InjectRepository(Homework) private homeworkRepo: Repository<Homework>,
         @InjectRepository(HomeworkAssignment) private assignmentRepo: Repository<HomeworkAssignment>,
         @InjectRepository(User) private userRepository: Repository<User>,
-        private readonly notificationService: FirebaseService,
+        private readonly notificationService: NotificationsService,
         private readonly cloudinaryService: CloudinaryService,
     ) { }
 
     async notifyGroup(studentIds: number[], title: string, content: string) {
-        console.log('🔔 NotifyGroup called with:', {
-            studentIds,
-            studentCount: studentIds?.length || 0,
-            title,
-            content: content.substring(0, 50) + '...'
-        });
-
         if (!studentIds || studentIds.length === 0) {
             console.warn('⚠️ No students to notify');
             return { success: false, message: 'No students provided' };
         }
 
         try {
-            console.log('📱 Fetching students with device tokens...');
-            
-            // Tìm danh sách sinh viên dựa trên ID
-            const students = await this.userRepository.find({
-                where: { id: In(studentIds) },
-                relations: ['deviceTokens'],
-            });
-
-            console.log('👥 Students found:', students.map(s => ({
-                id: s.id,
-                name: s.name,
-                email: s.email,
-                deviceTokenCount: s.deviceTokens?.length || 0
-            })));
-
-            // Lấy tất cả deviceTokens của các sinh viên
-            const deviceTokens = students
-                .map(student => student.deviceTokens || [])
-                .flat()
-                .map(tokenEntity => tokenEntity.token)
-                .filter(token => token && token.trim() !== '');
-
-            console.log('🎯 Device tokens extracted:', {
-                totalTokens: deviceTokens.length,
-                tokenPreviews: deviceTokens.map(token => token.substring(0, 20) + '...')
-            });
-
-            if (deviceTokens.length === 0) {
-                console.warn('⚠️ No device tokens found for students');
-                console.log('💡 Students need to register device tokens using POST /device-token/register');
-                return { 
-                    success: false, 
-                    message: 'No device tokens found',
-                    studentsFound: students.length,
-                    studentsRequested: studentIds.length
-                };
-            }
-
-            console.log(`📤 Sending notification to ${students.length} students with ${deviceTokens.length} tokens`);
-
-            const response = await this.notificationService.sendNotificationToToken(deviceTokens, title, content);
-            
-            console.log('✅ Firebase notification response:', {
-                successCount: response?.successCount || 0,
-                failureCount: response?.failureCount || 0,
-                responseCount: response?.responses?.length || 0
-            });
+            // Use NotificationsService to create and send notifications
+            const results = await this.notificationService.createAndSendToMultiple(
+                studentIds,
+                {
+                    type: NotificationType.HOMEWORK_ASSIGNED,
+                    title,
+                    body: content,
+                    data: {
+                        type: 'homework',
+                        timestamp: new Date().toISOString()
+                    }
+                }
+            );
 
             return {
                 success: true,
-                response,
-                studentsNotified: students.length,
-                tokensUsed: deviceTokens.length
+                notificationsCreated: results.recipients.length,
+                results: results.recipients
             };
 
         } catch (error) {
-            console.error('❌ Error sending notification:', error);
+            console.error('Error in notifyGroup:', error);
             return {
                 success: false,
                 error: error.message
@@ -97,22 +56,16 @@ export class HomeworkService {
     }
 
     async createHomework(dto: createdHomeworksRequest, file: Express.Multer.File | null, teacherId: number) {
-        console.log('Received DTO:', JSON.stringify(dto));
-        console.log('Student IDs:', dto.studentIds);
-        console.log('Due Date:', dto.dueDate);
-
         // Ensure dueDate is valid
         let dueDate: Date;
         try {
             // Parse the ISO date string
             dueDate = new Date(dto.dueDate);
-            
+
             // Validate the date
             if (isNaN(dueDate.getTime())) {
                 throw new Error('Invalid date value');
             }
-            
-            console.log('Parsed due date:', dueDate);
         } catch (error) {
             console.error('Error parsing due date:', error, dto.dueDate);
             throw new Error(`Invalid due date format: ${dto.dueDate}. Please provide a valid ISO date string.`);
@@ -145,23 +98,12 @@ export class HomeworkService {
         let fileUrl: string | null = null;
         if (file) {
             try {
-                console.log('Uploading file to Cloudinary:', {
-                    filename: file.originalname,
-                    mimetype: file.mimetype,
-                    size: file.size
-                });
-                
                 const uploadResult = await this.cloudinaryService.uploadFile(
                     file,
                     'homeworks'
                 );
                 fileUrl = uploadResult.fileUrl;
-                
-                console.log('File uploaded successfully:', {
-                    fileUrl: uploadResult.fileUrl,
-                    filePath: uploadResult.filePath,
-                    fileSize: uploadResult.fileSize
-                });
+
             } catch (error) {
                 console.error('Failed to upload homework file:', error);
                 console.error('File details:', {
@@ -172,19 +114,19 @@ export class HomeworkService {
                 throw new Error(`Failed to upload homework file to cloud storage: ${error.message}`);
             }
         }
-        // Tạo homework
+        // Create homework
         const homework = this.homeworkRepo.create({
             title: dto.title,
             description: dto.description,
-            dueDate: dueDate, // Sử dụng dueDate đã được xác thực
+            dueDate: dueDate,
             fileUrl: fileUrl || undefined,
             createdBy: { id: teacherId } as User,
         });
 
-        // Lưu homework
+        // Save homework
         const savedHomework = await this.homeworkRepo.save(homework);
 
-        // Tạo các assignment cho từng sinh viên
+        // Create assignments for each student
         const assignments = studentIds.map((studentId) =>
             this.assignmentRepo.create({
                 homework: savedHomework,
@@ -193,21 +135,18 @@ export class HomeworkService {
             }),
         );
 
-        // Lưu assignments
+        // Save assignments
         await this.assignmentRepo.save(assignments);
 
-        // Gửi thông báo cho sinh viên sau khi đã tạo assignments
+        // Send notifications to students
         if (studentIds && studentIds.length > 0) {
-            console.log('🔔 Starting notification process...');
             try {
                 const notificationResult = await this.notifyGroup(
                     studentIds,
                     `New Homework Assigned: ${homework.title}`,
                     `Teacher has assigned a homework for you: ${homework.description.substring(0, 50)}...`
                 );
-                
-                console.log('📱 Notification result:', notificationResult);
-                
+
                 if (notificationResult?.success) {
                     console.log(`✅ Notification sent successfully to ${studentIds.length} students`);
                 } else {
@@ -324,23 +263,13 @@ export class HomeworkService {
         let submitFileUrl: string | null = null;
         if (file) {
             try {
-                console.log('Uploading submission file to Cloudinary:', {
-                    filename: file.originalname,
-                    mimetype: file.mimetype,
-                    size: file.size
-                });
-                
                 // Upload file directly to Cloudinary
                 const uploadResult = await this.cloudinaryService.uploadFile(
                     file,
                     'submissions'
                 );
                 submitFileUrl = uploadResult.fileUrl;
-                
-                console.log('Submission file uploaded successfully:', {
-                    fileUrl: uploadResult.fileUrl,
-                    filePath: uploadResult.filePath
-                });
+
             } catch (error) {
                 console.error('Failed to upload submission file:', error);
                 console.error('File details:', {
@@ -365,6 +294,104 @@ export class HomeworkService {
         return {
             message: 'Homework submitted successfully',
             assignment,
+        };
+    }
+
+    async reviewHomework(
+        assignmentId: number, 
+        teacherId: number, 
+        reviewData: { 
+            grade?: string; 
+            feedback: string; 
+            status: 'graded' | 'pending' 
+        }
+    ) {
+        const assignment = await this.assignmentRepo.findOne({
+            where: { id: assignmentId },
+            relations: ['homework', 'homework.createdBy', 'student'],
+        });
+
+        if (!assignment) {
+            throw new NotFoundException('Assignment not found');
+        }
+
+        if (assignment.homework.createdBy.id !== teacherId) {
+            throw new Error('You do not have permission to review this assignment');
+        }
+
+        // Update assignment based on review decision
+        assignment.feedback = reviewData.feedback;
+        
+        if (reviewData.status === 'graded') {
+            // Approved - set grade and mark as graded
+            if (reviewData.grade) {
+                assignment.grade = reviewData.grade;
+            }
+            assignment.status = HomeworkStatus.GRADED;
+            assignment.gradedAt = new Date();
+            
+            // Send notification to student
+            try {
+                await this.notificationService.createAndSend({
+                    userId: assignment.student.id,
+                    type: NotificationType.HOMEWORK_GRADED,
+                    title: 'Homework Graded ✅',
+                    body: `Your submission for "${assignment.homework.title}" has been graded: ${reviewData.grade}`,
+                    data: {
+                        type: 'homework',
+                        homeworkId: assignment.homework.id.toString(),
+                        assignmentId: assignment.id.toString(),
+                        grade: reviewData.grade,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            } catch (notificationError) {
+                console.error('Failed to send grade notification:', notificationError);
+                // Continue with the process even if notification fails
+            }
+        } else {
+            // Needs revision - set back to pending
+            assignment.grade = null as any;
+            assignment.status = HomeworkStatus.PENDING;
+            assignment.gradedAt = null as any;
+            
+            // Send notification to student  
+            try {
+                await this.notificationService.createAndSend({
+                    userId: assignment.student.id,
+                    type: NotificationType.HOMEWORK_ASSIGNED, // Using assigned type for revision requests
+                    title: 'Homework Needs Revision 🔄',
+                    body: `Your submission for "${assignment.homework.title}" needs revision. Please check the feedback and resubmit.`,
+                    data: {
+                        type: 'homework',
+                        homeworkId: assignment.homework.id.toString(),
+                        assignmentId: assignment.id.toString(),
+                        action: 'revision_required',
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            } catch (notificationError) {
+                console.error('Failed to send revision notification:', notificationError);
+                // Continue with the process even if notification fails
+            }
+        }
+
+        await this.assignmentRepo.save(assignment);
+
+        return {
+            message: `Assignment ${reviewData.status === 'graded' ? 'approved and graded' : 'marked for revision'} successfully`,
+            assignment: {
+                id: assignment.id,
+                status: assignment.status,
+                grade: assignment.grade,
+                feedback: assignment.feedback,
+                gradedAt: assignment.gradedAt,
+                student: {
+                    id: assignment.student.id,
+                    name: assignment.student.name,
+                    email: assignment.student.email
+                }
+            }
         };
     }
 

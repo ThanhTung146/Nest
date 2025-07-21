@@ -26,10 +26,10 @@ export class HomeworkAssignment {
     @Column({ nullable: true })
     submitFileUrl: string;
 
-    @Column({ nullable: true })
+    @Column({ type: 'timestamp', nullable: true })
     submittedAt: Date;
 
-    @Column({ nullable: true })
+    @Column({ type: 'timestamp', nullable: true })
     gradedAt: Date;
 
     @Column({ nullable: true })

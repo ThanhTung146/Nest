@@ -175,8 +175,8 @@ export class LessonsController {
     }
 
     @Delete(':id')
-    @ApiOperation({ summary: 'Delete lesson by ID (Teacher only)' })
-    @ApiParam({ name: 'id', description: 'Lesson ID' })
+    @ApiOperation({ summary: 'Delete a lesson (Teacher only)' })
+    @ApiParam({ name: 'id', description: 'Lesson ID', type: 'number' })
     @ApiResponse({
         status: 200,
         description: 'Lesson deleted successfully',
@@ -184,6 +184,18 @@ export class LessonsController {
     async deleteLesson(@Param('id', ParseIntPipe) id: number, @Req() req) {
         const teacherId = req.user.id;
         return this.lessonsService.deleteLesson(id, teacherId);
+    }
+
+    @Delete(':id/remove-video')
+    @ApiOperation({ summary: 'Remove video from lesson (Teacher only)' })
+    @ApiParam({ name: 'id', description: 'Lesson ID', type: 'number' })
+    @ApiResponse({
+        status: 200,
+        description: 'Video removed successfully',
+    })
+    async removeVideo(@Param('id', ParseIntPipe) id: number, @Req() req) {
+        const teacherId = req.user.id;
+        return this.lessonsService.removeVideo(id, teacherId);
     }
 
     @Post('teacher-recent')
