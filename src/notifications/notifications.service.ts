@@ -7,9 +7,10 @@ import { DeviceTokenService } from '../device-token/device-token.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { CreateSingleNotificationDto } from './dto/create-single-notification.dto';
 import * as admin from 'firebase-admin';
+import * as path from 'path';
 
-// Firebase Admin initialization
-const serviceAccount = require('../../firebase-service-account.json');
+// Firebase Admin initialization với đường dẫn tuyệt đối
+const serviceAccountPath = path.join(process.cwd(), 'firebase-service-account.json');
 
 @Injectable()
 export class NotificationsService {
@@ -23,10 +24,12 @@ export class NotificationsService {
     // Initialize Firebase Admin if not already initialized
     if (!admin.apps.length) {
       try {
+        // Thử đọc service account file
+        const serviceAccount = require(serviceAccountPath);
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
         });
-        console.log('✅ Firebase Admin initialized successfully');
+        console.log('✅ Firebase Admin initialized successfully with service account file');
       } catch (error) {
         console.error('❌ Firebase Admin initialization error:', error);
         
