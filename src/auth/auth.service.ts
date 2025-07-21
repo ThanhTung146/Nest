@@ -5,7 +5,7 @@ import { RefreshTokenService } from './refresh-token.service';
 import * as bcrypt from 'bcrypt';
 import { RolesService } from 'src/roles/roles.service';
 import { LoginDto, RegisterDto } from './dto/request/auth-request.dto';
-import { RoleEnum } from 'src/common/enums/role.enum';
+import { RoleEnum } from '@common/enums/role.enum'
 
 @Injectable()
 export class AuthService {
